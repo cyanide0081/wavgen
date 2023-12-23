@@ -214,6 +214,7 @@ WavHeader buildWavHeader(const Parameters *p) {
 #if defined _MSC_VER
 #define strtok_r strtok_s
 #define strdup _strdup
+#define NAME_MAX FILENAME_MAX
 #endif
 
 typedef enum ConfigLine {
