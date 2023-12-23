@@ -2,3 +2,4 @@ wavgen
 wavgen.exe
 *.wav
 log.txt
+config.cfg
