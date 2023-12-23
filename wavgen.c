@@ -206,7 +206,6 @@ WavHeader buildWavHeader(const Parameters *p) {
 }
 
 #define PI 3.14159265358979323846
-#define FILE_BUF_SIZE (32 * KB)
 #define LINE_DELIMS "\r\n"
 #define MAX_AMP_DB 6.0
 #define KB 1024
@@ -248,14 +247,15 @@ Parameters parseParameters(const char *file) {
         .freqCount = 1,
         .waveType = WAVE_SINE,
         .durationSecs = 4.0,
-        .amplitude = 0.0,
+        .amplitude = -1.0,
         .sampleRate = 48000,
-        .bitsPerSample = 32,
+        .bitsPerSample = 24,
         .sampleFormat = FMT_INT_PCM,
-        .applyDither = true
+        .applyDither = true,
+        .outputFile = strdup(OUT_FILE_NAME)
     };
 
-    FILE *f = fopen(file, "rt"); // read-text mode
+    FILE *f = fopen(file, "r"); // read-text mode
     if (!f) {
         loggerAppend(ERR_READ, "unable to read config file '%s': %s",
             file, strerror(errno));
@@ -390,11 +390,10 @@ Parameters parseParameters(const char *file) {
             int len = snprintf(NULL, 0, "%s.wav", line);
             char *fileName = malloc(len * sizeof(*fileName));
             sprintf(fileName, "%s.wav", line);
-            if (strlen(fileName) >= FILENAME_MAX) {
+            if (strlen(fileName) >= NAME_MAX) {
                 loggerAppend(ERR_ARG,
                     "filename is longer than %d bytes"
-                    " (using default value)", FILENAME_MAX);
-                params.outputFile = strdup(OUT_FILE_NAME);
+                    " (using default value)", NAME_MAX);
                 free(fileName);
             } else {
                 params.outputFile = fileName;
@@ -403,7 +402,7 @@ Parameters parseParameters(const char *file) {
         }
     }
 
-    free(fileBuf);
+    if (fileBuf) free(fileBuf);
 
     char toneList[4 * KB] = {0};
     for (size_t i = 0; i < params.freqCount && params.freqs; i++) {
@@ -579,7 +578,7 @@ char *readFileContents(const char *restrict file, FILE *f) {
         return NULL;
     }
 
-    int len = ftell(f);
+    int len = ftell(f) + 1; // for NUL terminator
     if (!len) {
         return NULL;
     } else if (len == -1) {
@@ -589,7 +588,7 @@ char *readFileContents(const char *restrict file, FILE *f) {
     }
 
     rewind(f);
-    char *fileBuf = malloc(len * sizeof(*fileBuf));
+    char *fileBuf = calloc(len, sizeof(*fileBuf));
     fread(fileBuf, sizeof(*fileBuf), len, f);
 
     return fileBuf;
