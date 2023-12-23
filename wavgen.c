@@ -6,8 +6,10 @@
 #include <string.h>
 #include <ctype.h>
 #include <math.h>
+#include <limits.h>
 #include <time.h>
 #include <assert.h>
+#include <errno.h>
 
 typedef struct WavHeader {
     char chunkID[4];
@@ -210,7 +212,7 @@ WavHeader buildWavHeader(const Parameters *p) {
 #define KB 1024
 #define OUT_FILE_NAME "file.wav"
 
-#ifdef _MSC_VER
+#if defined _MSC_VER
 #define strtok_r strtok_s
 #define strdup _strdup
 #endif
@@ -418,7 +420,7 @@ Parameters parseParameters(const char *file) {
     if (params.sampleFormat == FMT_FLOAT_PCM) dither = "(ignored)";
 
     const double mb = (double)(params.sampleRate * params.durationSecs *
-        (params.bitsPerSample / 8) + sizeof(WavHeader)) / KB;
+        (params.bitsPerSample / 8.0) + sizeof(WavHeader)) / KB;
 
     loggerAppend(LOG_OK,
         "Generating %zu %s wave(s)...", params.freqCount, type);
@@ -473,7 +475,13 @@ double *parseDoubleList(char *line, size_t *listLen) {
         tok = strtok_r(NULL, DOUBLE_LIST_DELIMS, &parserState);
     }
 
-    realloc(list, i * sizeof(*list)); // trim list
+    double *trimmedList = realloc(list, i * sizeof(*list)); // trim list
+    if (!trimmedList) {
+        loggerAppend(ERR_FATAL, "out of memory: %s", strerror(errno));
+        loggerClose(errno);
+        exit(errno);
+    }
+
     *listLen = i;
     return list;
 }
@@ -604,6 +612,9 @@ const char* getWaveTypeString(WaveType type) {
     case WAVE_EVEN: {
         return "even";
     } break;
+    default: {
+        return "unknown";
+    }
     }
 }
 
@@ -640,7 +651,7 @@ double *generateWaves(const Parameters *p) {
     return buf;
 }
 
-#define BELOW_NYQUIST(freq, rate) (freq < rate / 2)
+#define BELOW_NYQUIST(freq, rate) (freq < rate / 2.0)
 #define SINE_WAVE(freq, factor, rate, i) \
     (double)(sin((2.0 * PI * freq * factor) / rate * i))
 
