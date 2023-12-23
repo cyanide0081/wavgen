@@ -1,0 +1,12 @@
+[2023-12-23 @ 15:45:15] Logger Initialized: WAV generator initialized
+[2023-12-23 @ 15:45:15] LOG: Generating 1 sine wave(s)...
+[2023-12-23 @ 15:45:15] LOG: Frequencies:   40.0Hz
+[2023-12-23 @ 15:45:15] LOG: Length:        5.00s (703.17KB)
+[2023-12-23 @ 15:45:15] LOG: Sample Peak:   -1.00dBFS
+[2023-12-23 @ 15:45:15] LOG: Sample Rate:   48000Hz
+[2023-12-23 @ 15:45:15] LOG: Sample Format: integer
+[2023-12-23 @ 15:45:15] LOG: Bit Depth:     24-bit
+[2023-12-23 @ 15:45:15] LOG: Dither:        Yes
+[2023-12-23 @ 15:45:15] LOG: Output File:   'file.wav'
+[2023-12-23 @ 15:45:15] Logger Closing: generator terminated normally with exit code 0
+
