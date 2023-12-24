@@ -81,15 +81,13 @@ void destroyAudioBuffer(AudioBuffer* b);
 
 #define LOG_FILE_NAME "log.txt"
 
-/* TODO:
- * add output file name parameter */
 int main(void) {
     assert(sizeof(WavHeader) == 44 &&
         "size of header is not 44 (consider using struct packing)");
     loggerInit(LOG_FILE_NAME);
     loggerAppend(LOG_INIT, "WAV generator initialized");
 
-    const Parameters p = parseParameters("config.cfg");
+    Parameters p = parseParameters("config.cfg");
     const WavHeader header = buildWavHeader(&p);
     AudioBuffer buf = buildAudioBuffer(&p);
 
@@ -105,7 +103,8 @@ int main(void) {
     fwrite(buf.data, buf.bytesPerSample, buf.sampleCount, f);
     fclose(f);
     loggerClose(0);
-    free(buf.data);
+    destroyParameters(&p);
+    destroyAudioBuffer(&buf);
 
     return 0;
 }
@@ -130,7 +129,7 @@ void loggerClose(int32_t code) {
     char *text = readFileContents(LOG_FILE_NAME, logFile);
     const char *status = code ? "abnormally" : "normally";
     loggerAppend(LOG_EXIT,
-        "generator terminated %s with exit code %d\n", status, code);
+        "generator terminated %s with exit code %d", status, code);
     fclose(logFile);
     if (!text) {
         remove(LOG_FILE_NAME);
@@ -147,7 +146,7 @@ void loggerAppend(LogState state, const char *restrict fmt, ...) {
         logState = "Logger Initialized";
     } break;
     case LOG_OK: {
-        logState = "LOG";
+        logState = "Log";
     } break;
     case ERR_READ: {
         logState = "READ ERROR";
@@ -256,7 +255,7 @@ Parameters parseParameters(const char *file) {
         .outputFile = strdup(OUT_FILE_NAME)
     };
 
-    FILE *f = fopen(file, "r"); // read-text mode
+    FILE *f = fopen(file, "r");
     if (!f) {
         loggerAppend(ERR_READ, "unable to read config file '%s': %s",
             file, strerror(errno));
@@ -475,7 +474,7 @@ double *parseDoubleList(char *line, size_t *listLen) {
         tok = strtok_r(NULL, DOUBLE_LIST_DELIMS, &parserState);
     }
 
-    double *trimmedList = realloc(list, i * sizeof(*list)); // trim list
+    double *trimmedList = realloc(list, i * sizeof(*list));
     if (!trimmedList) {
         loggerAppend(ERR_FATAL, "out of memory: %s", strerror(errno));
         loggerClose(errno);
