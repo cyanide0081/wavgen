@@ -781,7 +781,6 @@ void destroyAudioBuffer(AudioBuffer* b) {
     memset(b, 0, sizeof(*b));
 }
 
-/* TODO: 8-bit dithering is adding dc offset (cause unsigned) */
 void applyDither(double* buf, size_t len, uint32_t bits) {
     const double amp = 1.0 / pow(2.0, bits - 1) / RAND_MAX;
     for (size_t i = 0; i < len; i++) {
