@@ -3,3 +3,6 @@ wavgen.exe
 *.wav
 log.txt
 config.cfg
+/wavgen.ilk
+/wavgen.pdb
+/wavgen.sln
