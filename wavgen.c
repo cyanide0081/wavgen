@@ -74,10 +74,10 @@ void loggerClose(int32_t code);
 void loggerAppend(LogState state, const char *restrict fmt, ...);
 WavHeader buildWavHeader(const Parameters *params);
 Parameters parseParameters(const char *file);
-void destroyParameters(Parameters* p);
+void destroyParameters(Parameters *p);
 double *generateWaves(const Parameters *p);
 AudioBuffer buildAudioBuffer(const Parameters *p);
-void destroyAudioBuffer(AudioBuffer* b);
+void destroyAudioBuffer(AudioBuffer *b);
 
 #define LOG_FILE_NAME "log.txt"
 
@@ -103,8 +103,8 @@ int main(void) {
     fwrite(buf.data, buf.bytesPerSample, buf.sampleCount, f);
     fclose(f);
     loggerClose(0);
-    destroyParameters(&p);
     destroyAudioBuffer(&buf);
+    destroyParameters(&p);
 
     return 0;
 }
@@ -229,16 +229,16 @@ typedef enum ConfigLine {
     LINE_COUNT
 } ConfigLine;
 
-double parseDouble(const char* line);
-double* parseDoubleList(char* line, size_t* listLen);
-uint32_t parseUnsignedInt(const char* line);
-int32_t parseStringIntoWaveType(char* restrict line);
-int32_t parseStringIntoSampleFormat(char* restrict line);
-bool parseBool(const char* line);
-void stripWhiteSpace(char* restrict string);
-void stripDoubleQuotes(char* restrict string);
-const char* getWaveTypeString(WaveType type);
-const char* getSampleFormatString(SampleFormat fmt);
+double parseDouble(const char *line);
+double *parseFreqList(char *line, size_t *listLen);
+uint32_t parseUnsignedInt(const char *line);
+int32_t parseStringIntoWaveType(char *restrict line);
+int32_t parseStringIntoSampleFormat(char *restrict line);
+bool parseBool(const char *line);
+void stripWhiteSpace(char *restrict string);
+void stripDoubleQuotes(char *restrict string);
+const char *getWaveTypeString(WaveType type);
+const char *getSampleFormatString(SampleFormat fmt);
 
 Parameters parseParameters(const char *file) {
     static const double DefaultFreq = 440.0;
@@ -298,21 +298,9 @@ Parameters parseParameters(const char *file) {
         switch (i) {
         case LINE_TONE_FREQUENCIES: {
             size_t listLen = 0;
-            double *freqs = parseDoubleList(line, &listLen);
-            if (!errno) {
-                bool freqOk = true;
-                for (size_t i = 0; i < listLen; i++) {
-                    if (freqs[i] <= 0.0) {
-                        loggerAppend(ERR_ARG,
-                            "found illegal tone: every tone must be"
-                            " a positive number > 0.0Hz (ignoring list)");
-                        freqOk = false;
-                        break;
-                    }
-                }
+            double *freqs = parseFreqList(line, &listLen);
+            if (*freqs) params.freqs = freqs, params.freqCount = listLen;
 
-                if (freqOk) params.freqs = freqs, params.freqCount = listLen;
-            }
         } break;
         case LINE_WAVE_TYPE: {
             int32_t waveType = parseStringIntoWaveType(line);
@@ -396,6 +384,7 @@ Parameters parseParameters(const char *file) {
                     " (using default value)", NAME_MAX);
                 free(fileName);
             } else {
+                free(params.outputFile);
                 params.outputFile = fileName;
             }
         } break;
@@ -450,7 +439,7 @@ double parseDouble(const char *line) {
 #define INIT_DOUBLE_LIST_CAP 8
 #define DOUBLE_LIST_DELIMS ", "
 
-double *parseDoubleList(char *line, size_t *listLen) {
+double *parseFreqList(char *line, size_t *listLen) {
     size_t len = INIT_DOUBLE_LIST_CAP;
     double *list = calloc(len, sizeof(*list));
     char *parserState = NULL;
@@ -470,18 +459,33 @@ double *parseDoubleList(char *line, size_t *listLen) {
             len = newLen;
         }
 
-        list[i] = parseDouble(tok);
+        double num = parseDouble(tok);
+        if (num > 0.0) {
+            list[i] = num;
+        } else {
+            loggerAppend(ERR_ARG, "found illegal tone: every tone"
+                " must be a positive number > 0.0Hz (ignoring)");
+            i -= 1;
+        }
+
         tok = strtok_r(NULL, DOUBLE_LIST_DELIMS, &parserState);
     }
 
-    double *trimmedList = realloc(list, i * sizeof(*list));
+    len = i;
+    if (!len) {
+        free(list);
+        return NULL;
+    }
+
+    double *trimmedList = realloc(list, len * sizeof(*list));
     if (!trimmedList) {
         loggerAppend(ERR_FATAL, "out of memory: %s", strerror(errno));
         loggerClose(errno);
         exit(errno);
     }
 
-    *listLen = i;
+    list = trimmedList;
+    *listLen = len;
     return list;
 }
 
@@ -532,9 +536,9 @@ bool parseBool(const char *line) {
     return false;
 }
 
-void destroyParameters(Parameters* p) {
-    free(p->freqs);
-    free(p->outputFile);
+void destroyParameters(Parameters *p) {
+    if (p->freqs) free(p->freqs);
+    if (p->outputFile) free(p->outputFile);
     memset(p, 0, sizeof(*p));
 }
 
@@ -594,7 +598,7 @@ char *readFileContents(const char *restrict file, FILE *f) {
     return fileBuf;
 }
 
-const char* getWaveTypeString(WaveType type) {
+const char *getWaveTypeString(WaveType type) {
     switch (type) {
     case WAVE_SINE: {
         return "sine";
@@ -617,7 +621,7 @@ const char* getWaveTypeString(WaveType type) {
     }
 }
 
-const char* getSampleFormatString(SampleFormat fmt) {
+const char *getSampleFormatString(SampleFormat fmt) {
     return fmt == FMT_INT_PCM ? "integer" : "floating-point";
 }
 
@@ -659,7 +663,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate) {
     switch (type) {
     case WAVE_SINE: {
         for (size_t i = 0; i < len; i++) {
-            buf[i] = SINE_WAVE(freq, factor, rate, i);
+            buf[i] += SINE_WAVE(freq, factor, rate, i);
         }
     } break;
     case WAVE_TRIANGLE: {
@@ -709,7 +713,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate) {
     }
 }
 
-void applyDither(double* buf, size_t len, uint32_t bits);
+void applyDither(double *buf, size_t len, uint32_t bits);
 
 AudioBuffer buildAudioBuffer(const Parameters *p) {
     double *src = generateWaves(p);
@@ -776,12 +780,12 @@ AudioBuffer buildAudioBuffer(const Parameters *p) {
     return b;
 }
 
-void destroyAudioBuffer(AudioBuffer* b) {
+void destroyAudioBuffer(AudioBuffer *b) {
     free(b->data);
     memset(b, 0, sizeof(*b));
 }
 
-void applyDither(double* buf, size_t len, uint32_t bits) {
+void applyDither(double *buf, size_t len, uint32_t bits) {
     const double amp = 1.0 / pow(2.0, bits - 1) / RAND_MAX;
     for (size_t i = 0; i < len; i++) {
         buf[i] += (double)(rand() - rand()) * amp;
