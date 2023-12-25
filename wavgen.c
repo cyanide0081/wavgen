@@ -241,9 +241,8 @@ const char *getWaveTypeString(WaveType type);
 const char *getSampleFormatString(SampleFormat fmt);
 
 Parameters parseParameters(const char *file) {
-    static const double DefaultFreq = 440.0;
     Parameters params = { // default values
-        .freqs = (double*)&DefaultFreq,
+        .freqs = NULL,
         .freqCount = 1,
         .waveType = WAVE_SINE,
         .durationSecs = 4.0,
@@ -299,7 +298,12 @@ Parameters parseParameters(const char *file) {
         case LINE_TONE_FREQUENCIES: {
             size_t listLen = 0;
             double *freqs = parseFreqList(line, &listLen);
-            if (*freqs) params.freqs = freqs, params.freqCount = listLen;
+            if (freqs)  {
+                params.freqs = freqs, params.freqCount = listLen;
+            } else {
+                params.freqs = malloc(sizeof(*freqs));
+                *params.freqs = 440.0;
+            }
 
         } break;
         case LINE_WAVE_TYPE: {
