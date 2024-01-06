@@ -139,38 +139,40 @@ void loggerClose(int32_t code) {
     free(text);
 }
 
+#define KB 1024
+
 void loggerAppend(LogState state, const char *restrict fmt, ...) {
     const char *logState;
     switch (state) {
     case LOG_INIT: {
-        logState = "Logger Initialized";
+        logState = "INIT";
     } break;
     case LOG_OK: {
-        logState = "Log";
+        logState = "INFO";
     } break;
     case ERR_READ: {
-        logState = "READ ERROR";
+        logState = "READ";
     } break;
     case ERR_PARSE: {
-        logState = "PARSING ERROR";
+        logState = "PARSE";
     } break;
     case ERR_ARG: {
-        logState = "Illegal Argument";
+        logState = "ARG";
     } break;
     case ERR_FATAL: {
-        logState = "FATAL ERROR";
+        logState = "FATAL";
     } break;
     case LOG_EXIT: {
-        logState = "Logger Closing";
+        logState = "EXIT";
     } break;
     }
 
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
-    char localTime[64] = {0};
+    char localTime[KB] = {0};
     size_t ret = strftime(localTime, sizeof(localTime), "%F @ %T", tm);
     assert(ret && "unable to retrieve local time string");
-    char format[2048] = {0};
+    char format[2 * KB] = {0};
     snprintf(format, sizeof(format), "[%s] %s: %s\n", localTime, logState, fmt);
     fmt = format;
     va_list args;
@@ -207,7 +209,6 @@ WavHeader buildWavHeader(const Parameters *p) {
 #define PI 3.14159265358979323846
 #define LINE_DELIMS "\r\n"
 #define MAX_AMP_DB 6.0
-#define KB 1024
 #define OUT_FILE_NAME "file.wav"
 
 #if defined _MSC_VER
@@ -604,24 +605,18 @@ char *readFileContents(const char *restrict file, FILE *f) {
 
 const char *getWaveTypeString(WaveType type) {
     switch (type) {
-    case WAVE_SINE: {
+    case WAVE_SINE:
         return "sine";
-    } break;
-    case WAVE_TRIANGLE: {
+    case WAVE_TRIANGLE:
         return "triangle";
-    } break;
-    case WAVE_SQUARE: {
+    case WAVE_SQUARE:
         return "square";
-    } break;
-    case WAVE_SAW: {
+    case WAVE_SAW:
         return "saw";
-    } break;
-    case WAVE_EVEN: {
+    case WAVE_EVEN:
         return "even";
-    } break;
-    default: {
+    default:
         return "unknown";
-    }
     }
 }
 
@@ -749,8 +744,6 @@ AudioBuffer buildAudioBuffer(const Parameters *p) {
             }
         } break;
         case 24: {
-            /* NOTE: this bit shifting will probably work very
-             * badly if the machine has the wrong endianness */
             for (size_t i = 0, j = 0; i < len; i++, j += 3) {
                 int32_t val = (int32_t)round(src[i] * maxInt);
                 ((int8_t*)buf)[j] = (int8_t)(val);
