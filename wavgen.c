@@ -85,7 +85,6 @@ int main(void) {
     assert(sizeof(WavHeader) == 44 &&
         "size of header is not 44 (consider using struct packing)");
     loggerInit(LOG_FILE_NAME);
-    loggerAppend(LOG_INIT, "WAV generator initialized");
 
     Parameters p = parseParameters("config.cfg");
     const WavHeader header = buildWavHeader(&p);
@@ -109,6 +108,8 @@ int main(void) {
     return 0;
 }
 
+#define KB 1024
+
 char *readFileContents(const char *restrict file, FILE *f);
 
 static FILE *logFile = NULL;
@@ -123,13 +124,21 @@ void loggerInit(const char *file) {
             file, strerror(errno));
         exit(errno);
     }
+
+    time_t t = time(NULL);
+    struct tm *tm = localtime(&t);
+    char localTime[KB] = {0};
+    size_t ret = strftime(localTime, sizeof(localTime), "%F @ %T", tm);
+    if (!ret) loggerAppend(ERR_READ, "unable to retrieve local time string");
+    
+    loggerAppend(LOG_INIT, "WAVE generator initialized: [%s]", localTime);
 }
 
 void loggerClose(int32_t code) {
     char *text = readFileContents(LOG_FILE_NAME, logFile);
     const char *status = code ? "abnormally" : "normally";
     loggerAppend(LOG_EXIT,
-        "generator terminated %s with exit code %d", status, code);
+        "generator terminated %s with exit code: %d", status, code);
     fclose(logFile);
     if (!text) {
         remove(LOG_FILE_NAME);
@@ -138,8 +147,6 @@ void loggerClose(int32_t code) {
 
     free(text);
 }
-
-#define KB 1024
 
 void loggerAppend(LogState state, const char *restrict fmt, ...) {
     const char *logState;
@@ -167,17 +174,12 @@ void loggerAppend(LogState state, const char *restrict fmt, ...) {
     } break;
     }
 
-    time_t t = time(NULL);
-    struct tm *tm = localtime(&t);
-    char localTime[KB] = {0};
-    size_t ret = strftime(localTime, sizeof(localTime), "%F @ %T", tm);
-    assert(ret && "unable to retrieve local time string");
     char format[2 * KB] = {0};
-    snprintf(format, sizeof(format), "[%s] %s: %s\n", localTime, logState, fmt);
+    snprintf(format, sizeof(format), "[%s] %s\n", logState, fmt);
     fmt = format;
     va_list args;
     va_start(args, fmt);
-    ret = vfprintf(logFile, fmt, args);
+    int ret = vfprintf(logFile, fmt, args);
     va_end(args);
     if (ret <= 0) {
         fprintf(stderr,
