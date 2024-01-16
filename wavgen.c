@@ -640,15 +640,14 @@ double *generateWaves(const Parameters *p) {
     double posPeak = *buf, negPeak = *buf;
     for (size_t i = 1; i < len; i++) {
         if (buf[i] > posPeak) posPeak = buf[i];
-        if (buf[i] < negPeak) negPeak = buf[i];
+        else if (buf[i] < negPeak) negPeak = buf[i];
     }
 
-    double peak = posPeak > -negPeak ? posPeak : -negPeak;
-    double maxVal = decibelsToGain(p->amplitude);
-    peak /= maxVal;
-    if (peak != 1.0) {
+    double absPeak = posPeak > -negPeak ? posPeak : -negPeak;
+    absPeak /= decibelsToGain(p->amplitude);
+    if (absPeak != 1.0) {
         for (size_t i = 0; i < len; i++) {
-            buf[i] /= peak;
+            buf[i] /= absPeak;
         }
     }
 
@@ -724,7 +723,7 @@ AudioBuffer buildAudioBuffer(const Parameters *p) {
     AudioBuffer b = {
         .sampleCount = len,
         .bytesPerSample = bits / 8,
-        .data = malloc(len * bits / 8)
+        .data = bits == 64 ? src : malloc(len * bits / 8)
     };
 
     void *buf = b.data;
@@ -746,6 +745,7 @@ AudioBuffer buildAudioBuffer(const Parameters *p) {
             }
         } break;
         case 24: {
+            // easiest way to copy 24 bits of data at a time i could think of
             for (size_t i = 0, j = 0; i < len; i++, j += 3) {
                 int32_t val = (int32_t)round(src[i] * maxInt);
                 ((int8_t*)buf)[j] = (int8_t)(val);
@@ -768,7 +768,7 @@ AudioBuffer buildAudioBuffer(const Parameters *p) {
             }
         } break;
         case 64: {
-            memcpy(buf, src, len * sizeof(*src));
+            return b; // early return here so as to not free the 64-bit buffer
         } break;
         }
     } break;
