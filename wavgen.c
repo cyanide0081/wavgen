@@ -783,12 +783,13 @@ AudioBuffer buildAudioBuffer(const Parameters *p) {
             }
         } break;
         case 24: {
-            // easiest way to copy 24 bits of data at a time i could think of
-            for (size_t i = 0, j = 0; i < len; i++, j += 3) {
+            enum { word = 3 * sizeof(int8_t) };
+
+            for (size_t i = 0; i < len; i++) {
                 int32_t val = (int32_t)round(src[i] * maxInt);
-                ((int8_t*)buf)[j] = (int8_t)(val);
-                ((int8_t*)buf)[j + 1] = (int8_t)(val >> 8);
-                ((int8_t*)buf)[j + 2] = (int8_t)(val >> 16);
+                for (size_t j = 0, offset = 0; j < word; j++, offset += 8) {
+                    ((int8_t*)buf)[i * word + j] = (int8_t)(val >> offset);
+                }
             }
         } break;
         case 32: {
