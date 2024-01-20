@@ -8,7 +8,6 @@
 #include <math.h>
 #include <limits.h>
 #include <time.h>
-#include <assert.h>
 #include <errno.h>
 
 typedef struct WavHeader {
@@ -82,8 +81,12 @@ void destroyAudioBuffer(AudioBuffer *b);
 #define LOG_FILE_NAME "log.txt"
 
 int main(void) {
-    assert(sizeof(WavHeader) == 44 &&
-        "size of header is not 44 (consider using struct packing)");
+    if (sizeof(WavHeader) != 44) {
+        fprintf(stderr,
+            "size of header is not 44 (consider using struct packing)");
+        return 1;
+    }
+
     loggerInit(LOG_FILE_NAME);
 
     Parameters p = parseParameters("config.cfg");
@@ -130,7 +133,7 @@ void loggerInit(const char *file) {
     char localTime[KB] = {0};
     size_t ret = strftime(localTime, sizeof(localTime), "%F @ %T", tm);
     if (!ret) loggerAppend(ERR_READ, "unable to retrieve local time string");
-    
+
     loggerAppend(LOG_INIT, "WAVE generator initialized: [%s]", localTime);
 }
 
@@ -212,6 +215,9 @@ WavHeader buildWavHeader(const Parameters *p) {
 #define LINE_DELIMS "\r\n"
 #define MAX_AMP_DB 6.0
 #define OUT_FILE_NAME "file.wav"
+
+#define ERR_OUT_OF_MEMORY() loggerAppend(ERR_FATAL, \
+    "failed to allocate more memory: %s\n", strerror(errno))
 
 #if defined _MSC_VER
 #define strtok_r strtok_s
@@ -305,6 +311,11 @@ Parameters parseParameters(const char *file) {
                 params.freqs = freqs, params.freqCount = listLen;
             } else {
                 params.freqs = malloc(sizeof(*freqs));
+                if (!params.freqs) {
+                    ERR_OUT_OF_MEMORY();
+                    abort();
+                }
+
                 *params.freqs = 440.0;
             }
 
@@ -384,6 +395,11 @@ Parameters parseParameters(const char *file) {
             stripDoubleQuotes(line);
             int len = snprintf(NULL, 0, "%s.wav", line);
             char *fileName = malloc(len * sizeof(*fileName));
+            if (!fileName) {
+                ERR_OUT_OF_MEMORY();
+                abort();
+            }
+
             sprintf(fileName, "%s.wav", line);
             if (strlen(fileName) >= NAME_MAX) {
                 loggerAppend(ERR_ARG,
@@ -449,6 +465,11 @@ double parseDouble(const char *line) {
 double *parseFreqList(char *line, size_t *listLen) {
     size_t len = INIT_DOUBLE_LIST_CAP;
     double *list = calloc(len, sizeof(*list));
+    if (!list) {
+        ERR_OUT_OF_MEMORY();
+        abort();
+    }
+
     char *parserState = NULL;
     char *tok = strtok_r(line, DOUBLE_LIST_DELIMS, &parserState);
     size_t i;
@@ -457,9 +478,8 @@ double *parseFreqList(char *line, size_t *listLen) {
             size_t newLen = len * 2;
             double *newList = realloc(list, newLen * sizeof(*newList));
             if (!newList) {
-                loggerAppend(ERR_FATAL, "out of memory: %s", strerror(errno));
-                loggerClose(errno);
-                exit(errno);
+                ERR_OUT_OF_MEMORY();
+                abort();
             }
 
             list = newList;
@@ -486,9 +506,8 @@ double *parseFreqList(char *line, size_t *listLen) {
 
     double *trimmedList = realloc(list, len * sizeof(*list));
     if (!trimmedList) {
-        loggerAppend(ERR_FATAL, "out of memory: %s", strerror(errno));
-        loggerClose(errno);
-        exit(errno);
+        ERR_OUT_OF_MEMORY();
+        abort();
     }
 
     list = trimmedList;
@@ -600,6 +619,11 @@ char *readFileContents(const char *restrict file, FILE *f) {
 
     rewind(f);
     char *fileBuf = calloc(len, sizeof(*fileBuf));
+    if (!fileBuf) {
+        ERR_OUT_OF_MEMORY();
+        abort();
+    }
+
     fread(fileBuf, sizeof(*fileBuf), len, f);
 
     return fileBuf;
@@ -629,10 +653,17 @@ const char *getSampleFormatString(SampleFormat fmt) {
 void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate);
 double gainToDecibels(double gain);
 double decibelsToGain(double decibels);
+bool machineIsBigEndian(void);
+void convertToLittleEndian(double *buf, size_t len);
 
 double *generateWaves(const Parameters *p) {
     size_t len = (size_t)(p->sampleRate * p->durationSecs);
     double *buf = calloc(len, sizeof(*buf));
+    if (!buf) {
+        ERR_OUT_OF_MEMORY();
+        abort();
+    }
+
     for (size_t i = 0; i < p->freqCount; i++) {
         addWave(buf, len, p->waveType, p->freqs[i], p->sampleRate);
     }
@@ -650,6 +681,8 @@ double *generateWaves(const Parameters *p) {
             buf[i] /= absPeak;
         }
     }
+
+    if (machineIsBigEndian()) convertToLittleEndian(buf, len);
 
     return buf;
 }
@@ -726,6 +759,11 @@ AudioBuffer buildAudioBuffer(const Parameters *p) {
         .data = bits == 64 ? src : malloc(len * bits / 8)
     };
 
+    if (!b.data) {
+        ERR_OUT_OF_MEMORY();
+        abort();
+    }
+
     void *buf = b.data;
     switch (p->sampleFormat) {
     case FMT_INT_PCM: {
@@ -800,4 +838,26 @@ double gainToDecibels(double gain) {
 
 double decibelsToGain(double decibels) {
     return decibels > MINUS_INF_DB ? pow(10.0, decibels * 0.05) : 0.0;
+}
+
+bool machineIsBigEndian(void) {
+    static const uint32_t n = 0x1;
+    return *((char*)&n) == 0;
+}
+
+void convertToLittleEndian(double *buf, size_t len) {
+    enum { size = sizeof(*buf) };
+    union {
+        double n;
+        char b[size];
+    } src, res;
+
+    for (size_t i = 0; i < len; i++) {
+        src.n = buf[i];
+        for (size_t j = 0; j < size; j++) {
+            res.b[j] = src.b[size - 1 - j];
+        }
+
+        buf[i] = res.n;
+    }
 }
