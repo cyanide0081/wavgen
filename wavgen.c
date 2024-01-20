@@ -79,13 +79,10 @@ AudioBuffer buildAudioBuffer(const Parameters *p);
 void destroyAudioBuffer(AudioBuffer *b);
 
 #define LOG_FILE_NAME "log.txt"
+#define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2 * !!(condition)]))
 
 int main(void) {
-    if (sizeof(WavHeader) != 44) {
-        fprintf(stderr,
-            "size of header is not 44 (consider using struct packing)");
-        return 1;
-    }
+    BUILD_BUG_ON(sizeof(WavHeader) != 44); // header must be 44 bytes
 
     loggerInit(LOG_FILE_NAME);
 
