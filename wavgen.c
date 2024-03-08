@@ -71,12 +71,12 @@ typedef enum LogState {
 void loggerInit(const char *file);
 void loggerClose(int32_t code);
 void loggerAppend(LogState state, const char *restrict fmt, ...);
-WavHeader buildWavHeader(const Parameters *params);
-Parameters parseParameters(const char *file);
-void destroyParameters(Parameters *p);
+WavHeader wavHeaderBuild(const Parameters *params);
+Parameters parametersParse(const char *file);
+void parametersDestroy(Parameters *p);
 double *generateWaves(const Parameters *p);
-AudioBuffer buildAudioBuffer(const Parameters *p);
-void destroyAudioBuffer(AudioBuffer *b);
+AudioBuffer audioBufferBuild(const Parameters *p);
+void audioBufferDestroy(AudioBuffer *b);
 
 #define LOG_FILE_NAME "log.txt"
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2 * !!(condition)]))
@@ -86,9 +86,9 @@ int main(void) {
 
     loggerInit(LOG_FILE_NAME);
 
-    Parameters p = parseParameters("config.cfg");
-    const WavHeader header = buildWavHeader(&p);
-    AudioBuffer buf = buildAudioBuffer(&p);
+    Parameters p = parametersParse("config.cfg");
+    const WavHeader header = wavHeaderBuild(&p);
+    AudioBuffer buf = audioBufferBuild(&p);
 
     FILE *f = fopen(p.outputFile, "wb"); // write-binary mode
     if (!f) {
@@ -102,8 +102,8 @@ int main(void) {
     fwrite(buf.data, buf.bytesPerSample, buf.sampleCount, f);
     fclose(f);
     loggerClose(0);
-    destroyAudioBuffer(&buf);
-    destroyParameters(&p);
+    audioBufferDestroy(&buf);
+    parametersDestroy(&p);
 
     return 0;
 }
@@ -187,7 +187,7 @@ void loggerAppend(LogState state, const char *restrict fmt, ...) {
     }
 }
 
-WavHeader buildWavHeader(const Parameters *p) {
+WavHeader wavHeaderBuild(const Parameters *p) {
     WavHeader h = {
         .chunkID = "RIFF",
         .format = "WAVE",
@@ -243,10 +243,10 @@ int32_t parseStringIntoSampleFormat(char *restrict line);
 bool parseBool(const char *line);
 void stripWhiteSpace(char *restrict string);
 void stripDoubleQuotes(char *restrict string);
-const char *getWaveTypeString(WaveType type);
-const char *getSampleFormatString(SampleFormat fmt);
+const char *stringFromWaveType(WaveType type);
+const char *stringFromSampleFormat(SampleFormat fmt);
 
-Parameters parseParameters(const char *file) {
+Parameters parametersParse(const char *file) {
     Parameters params = { // default values
         .freqs = NULL,
         .freqCount = 1,
@@ -422,8 +422,8 @@ Parameters parseParameters(const char *file) {
 
     toneList[strlen(toneList) - 2] = '\0';
 
-    const char *type = getWaveTypeString(params.waveType);
-    const char *sampleFmt = getSampleFormatString(params.sampleFormat);
+    const char *type = stringFromWaveType(params.waveType);
+    const char *sampleFmt = stringFromSampleFormat(params.sampleFormat);
     const char *dither = params.applyDither ? "Yes" : "No";
     if (params.sampleFormat == FMT_FLOAT_PCM) dither = "(ignored)";
 
@@ -559,7 +559,7 @@ bool parseBool(const char *line) {
     return false;
 }
 
-void destroyParameters(Parameters *p) {
+void parametersDestroy(Parameters *p) {
     if (p->freqs) free(p->freqs);
     if (p->outputFile) free(p->outputFile);
     memset(p, 0, sizeof(*p));
@@ -626,7 +626,7 @@ char *readFileContents(const char *restrict file, FILE *f) {
     return fileBuf;
 }
 
-const char *getWaveTypeString(WaveType type) {
+const char *stringFromWaveType(WaveType type) {
     switch (type) {
     case WAVE_SINE:
         return "sine";
@@ -643,7 +643,7 @@ const char *getWaveTypeString(WaveType type) {
     }
 }
 
-const char *getSampleFormatString(SampleFormat fmt) {
+const char *stringFromSampleFormat(SampleFormat fmt) {
     return fmt == FMT_INT_PCM ? "integer" : "floating-point";
 }
 
@@ -745,7 +745,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate) {
 
 void applyDither(double *buf, size_t len, uint32_t bits);
 
-AudioBuffer buildAudioBuffer(const Parameters *p) {
+AudioBuffer audioBufferBuild(const Parameters *p) {
     double *src = generateWaves(p);
     size_t len = (size_t)((p->sampleRate) * (p->durationSecs));
     uint32_t bits = p->bitsPerSample;
@@ -815,7 +815,7 @@ AudioBuffer buildAudioBuffer(const Parameters *p) {
     return b;
 }
 
-void destroyAudioBuffer(AudioBuffer *b) {
+void audioBufferDestroy(AudioBuffer *b) {
     free(b->data);
     memset(b, 0, sizeof(*b));
 }
