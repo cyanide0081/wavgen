@@ -11,7 +11,7 @@ fi
 
 DEFINES="-D_POSIX_C_SOURCE=200809L -D_DEFAULT_SOURCE"
 FLAGS="-std=c99 $DEFINES -Wall -Wextra -pedantic -lm"
-D_FLAGS="-g -ggdb"
+D_FLAGS="-g -ggdb" # debug info tuned for gdb
 R_FLAGS="-DNDEBUG -O2 -s"
 file="wavgen"
 
@@ -23,7 +23,7 @@ else
     args="$FLAGS $R_FLAGS"
 fi
 
-printf "\033[1;44mBuilding rffmpeg in $mode mode...\033[0m\n"
+printf "\033[1;44mBuilding wavgen in $mode mode...\033[0m\n"
 
 set -x
 $CC -o $file $file.c $args || exit 1
