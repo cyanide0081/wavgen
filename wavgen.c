@@ -95,7 +95,7 @@ int main(void) {
         loggerAppend(ERR_FATAL, "unable to open file '%s' for writing: %s",
             p.outputFile, strerror(errno));
         loggerClose(errno);
-        exit(errno);
+        exit(EXIT_FAILURE);
     }
 
     fwrite(&header, sizeof(header), 1, f);
@@ -122,7 +122,7 @@ void loggerInit(const char *file) {
         fprintf(stderr,
             "FATAL: unable to open logging file '%s' for writing: %s\n",
             file, strerror(errno));
-        exit(errno);
+        exit(EXIT_FAILURE);
     }
 
     time_t t = time(NULL);
@@ -270,7 +270,7 @@ Parameters parametersParse(const char *file) {
 
     if (!params.freqs) {
         ERR_OUT_OF_MEMORY();
-        abort();
+        exit(EXIT_FAILURE);
     }
 
     *params.freqs = 440.0;
@@ -388,6 +388,13 @@ Parameters parametersParse(const char *file) {
                         fmtOk = false;
                     }
                 } break;
+                default: {
+                    loggerAppend(LOG_INFO,
+                        "(defaulting sample format to 24-bit int)", line);
+                    params.bitsPerSample = 24;
+                    params.sampleFormat = FMT_INT_PCM;
+                    fmtOk = false;
+                } break;
                 }
 
                 if (fmtOk) params.sampleFormat = sampleFormat;
@@ -403,7 +410,7 @@ Parameters parametersParse(const char *file) {
             char *fileName = malloc(len * sizeof(*fileName));
             if (!fileName) {
                 ERR_OUT_OF_MEMORY();
-                abort();
+                exit(EXIT_FAILURE);
             }
 
             sprintf(fileName, "%s.wav", line);
@@ -476,7 +483,7 @@ double *parseFreqList(char *line, size_t *listLen) {
     double *list = calloc(len, sizeof(*list));
     if (!list) {
         ERR_OUT_OF_MEMORY();
-        abort();
+        exit(EXIT_FAILURE);
     }
 
     char *parserState = NULL;
@@ -488,7 +495,7 @@ double *parseFreqList(char *line, size_t *listLen) {
             double *newList = realloc(list, newLen * sizeof(*newList));
             if (!newList) {
                 ERR_OUT_OF_MEMORY();
-                abort();
+                exit(EXIT_FAILURE);
             }
 
             list = newList;
@@ -516,7 +523,7 @@ double *parseFreqList(char *line, size_t *listLen) {
     double *trimmedList = realloc(list, len * sizeof(*list));
     if (!trimmedList) {
         ERR_OUT_OF_MEMORY();
-        abort();
+        exit(EXIT_FAILURE);
     }
 
     list = trimmedList;
@@ -537,7 +544,6 @@ uint32_t parseUnsignedInt(const char *line) {
 
 int32_t parseStringIntoWaveType(char *restrict line) {
     stripDoubleQuotes(line);
-
     if (strcmp(line, "sine") == 0) return WAVE_SINE;
     if (strcmp(line, "triangle") == 0) return WAVE_TRIANGLE;
     if (strcmp(line, "square") == 0) return WAVE_SQUARE;
@@ -550,9 +556,8 @@ int32_t parseStringIntoWaveType(char *restrict line) {
 
 int32_t parseStringIntoSampleFormat(char *restrict line) {
     stripDoubleQuotes(line);
-
-    if (strcmp(line, "integer") == 0) return FMT_INT_PCM;
-    if (strcmp(line, "floating-point") == 0) return FMT_FLOAT_PCM;
+    if (strcmp(line, "int") == 0) return FMT_INT_PCM;
+    if (strcmp(line, "float") == 0) return FMT_FLOAT_PCM;
 
     loggerAppend(ERR_PARSE, "unrecognized sample format: '%s'", line);
     return -1;
@@ -630,7 +635,7 @@ char *readFileContents(const char *restrict file, FILE *f) {
     char *fileBuf = calloc(len, sizeof(*fileBuf));
     if (!fileBuf) {
         ERR_OUT_OF_MEMORY();
-        abort();
+        exit(EXIT_FAILURE);
     }
 
     fread(fileBuf, sizeof(*fileBuf), len, f);
@@ -670,7 +675,7 @@ double *generateWaves(const Parameters *p) {
     double *buf = calloc(len, sizeof(*buf));
     if (!buf) {
         ERR_OUT_OF_MEMORY();
-        abort();
+        exit(EXIT_FAILURE);
     }
 
     for (size_t i = 0; i < p->freqCount; i++) {
@@ -771,7 +776,7 @@ AudioBuffer audioBufferBuild(const Parameters *p) {
 
     if (!b.data) {
         ERR_OUT_OF_MEMORY();
-        abort();
+        exit(EXIT_FAILURE);
     }
 
     void *buf = b.data;
