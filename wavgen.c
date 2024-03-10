@@ -60,7 +60,7 @@ typedef struct AudioBuffer {
 
 typedef enum LogState {
     LOG_INIT,
-    LOG_OK,
+    LOG_INFO,
     ERR_READ,
     ERR_PARSE,
     ERR_ARG,
@@ -127,18 +127,18 @@ void loggerInit(const char *file) {
 
     time_t t = time(NULL);
     struct tm *tm = localtime(&t);
-    char localTime[KB] = {0};
+    char localTime[KB];
     size_t ret = strftime(localTime, sizeof(localTime), "%F @ %T", tm);
-    if (!ret) loggerAppend(ERR_READ, "unable to retrieve local time string");
+    if (!ret) strncpy(localTime, "unable to retrieve local date and time", KB);
 
-    loggerAppend(LOG_INIT, "WAVE generator initialized: [%s]", localTime);
+    loggerAppend(LOG_INIT, "WAVE generator initialized (%s)", localTime);
 }
 
 void loggerClose(int32_t code) {
     char *text = readFileContents(LOG_FILE_NAME, logFile);
     const char *status = code ? "abnormally" : "normally";
     loggerAppend(LOG_EXIT,
-        "generator terminated %s with exit code: %d", status, code);
+        "generator terminated %s with exit code %d", status, code);
     fclose(logFile);
     if (!text) {
         remove(LOG_FILE_NAME);
@@ -154,7 +154,7 @@ void loggerAppend(LogState state, const char *restrict fmt, ...) {
     case LOG_INIT: {
         logState = "INIT";
     } break;
-    case LOG_OK: {
+    case LOG_INFO: {
         logState = "INFO";
     } break;
     case ERR_READ: {
@@ -175,16 +175,23 @@ void loggerAppend(LogState state, const char *restrict fmt, ...) {
     }
 
     char format[2 * KB] = {0};
-    snprintf(format, sizeof(format), "[%s] %s\n", logState, fmt);
+    snprintf(format, sizeof(format), "[%s]: %s\n", logState, fmt);
     fmt = format;
     va_list args;
     va_start(args, fmt);
-    int ret = vfprintf(logFile, fmt, args);
-    va_end(args);
-    if (ret <= 0) {
+    if (vfprintf(logFile, fmt, args) <= 0) {
         fprintf(stderr,
             "unable to write log message to file: %s\n", strerror(errno));
+    } 
+    
+    va_end(args);
+    va_start(args, fmt);
+    if (vprintf(fmt, args) <= 0) {
+        fprintf(stderr,
+            "unable to write log message to stdout: %s\n", strerror(errno));
     }
+    
+    va_end(args);
 }
 
 WavHeader wavHeaderBuild(const Parameters *p) {
@@ -245,10 +252,11 @@ void stripWhiteSpace(char *restrict string);
 void stripDoubleQuotes(char *restrict string);
 const char *stringFromWaveType(WaveType type);
 const char *stringFromSampleFormat(SampleFormat fmt);
+void logWaveProperties(Parameters *p);
 
 Parameters parametersParse(const char *file) {
     Parameters params = { // default values
-        .freqs = NULL,
+        .freqs = malloc(sizeof(*params.freqs)),
         .freqCount = 1,
         .waveType = WAVE_SINE,
         .durationSecs = 4.0,
@@ -260,10 +268,18 @@ Parameters parametersParse(const char *file) {
         .outputFile = strdup(OUT_FILE_NAME)
     };
 
+    if (!params.freqs) {
+        ERR_OUT_OF_MEMORY();
+        abort();
+    }
+
+    *params.freqs = 440.0;
+
     FILE *f = fopen(file, "r");
     if (!f) {
         loggerAppend(ERR_READ, "unable to read config file '%s': %s",
             file, strerror(errno));
+        logWaveProperties(&params);
         return params;
     }
 
@@ -305,17 +321,9 @@ Parameters parametersParse(const char *file) {
             size_t listLen = 0;
             double *freqs = parseFreqList(line, &listLen);
             if (freqs)  {
+                free(params.freqs);
                 params.freqs = freqs, params.freqCount = listLen;
-            } else {
-                params.freqs = malloc(sizeof(*freqs));
-                if (!params.freqs) {
-                    ERR_OUT_OF_MEMORY();
-                    abort();
-                }
-
-                *params.freqs = 440.0;
             }
-
         } break;
         case LINE_WAVE_TYPE: {
             int32_t waveType = parseStringIntoWaveType(line);
@@ -341,6 +349,7 @@ Parameters parametersParse(const char *file) {
                         highestFreq = params.freqs[i];
                     }
                 }
+
                 size_t nyquistLimit = (size_t)(highestFreq * 2);
                 if (sampleRate <= nyquistLimit) {
                     loggerAppend(ERR_ARG,
@@ -413,36 +422,39 @@ Parameters parametersParse(const char *file) {
 
     if (fileBuf) free(fileBuf);
 
+    logWaveProperties(&params);
+    return params;
+}
+
+void logWaveProperties(Parameters *p) {
     char toneList[4 * KB] = {0};
-    for (size_t i = 0; i < params.freqCount && params.freqs; i++) {
+    for (size_t i = 0; i < p->freqCount && p->freqs; i++) {
         char num[32] = {0};
-        snprintf(num, sizeof(num), "%.1lfHz, ", params.freqs[i]);
+        snprintf(num, sizeof(num), "%.1lfHz, ", p->freqs[i]);
         strncat(toneList, num, sizeof(toneList) - 1);
     }
 
     toneList[strlen(toneList) - 2] = '\0';
 
-    const char *type = stringFromWaveType(params.waveType);
-    const char *sampleFmt = stringFromSampleFormat(params.sampleFormat);
-    const char *dither = params.applyDither ? "Yes" : "No";
-    if (params.sampleFormat == FMT_FLOAT_PCM) dither = "(ignored)";
+    const char *type = stringFromWaveType(p->waveType);
+    const char *sampleFmt = stringFromSampleFormat(p->sampleFormat);
+    const char *dither = p->applyDither ? "Yes" : "No";
+    if (p->sampleFormat == FMT_FLOAT_PCM) dither = "(ignored)";
 
-    const double mb = (double)(params.sampleRate * params.durationSecs *
-        (params.bitsPerSample / 8.0) + sizeof(WavHeader)) / KB;
+    const double mb = (double)(p->sampleRate * p->durationSecs *
+        (p->bitsPerSample / 8.0) + sizeof(WavHeader)) / KB;
 
-    loggerAppend(LOG_OK,
-        "Generating %zu %s wave(s)...", params.freqCount, type);
-    loggerAppend(LOG_OK, "Frequencies:   %s", toneList);
-    loggerAppend(LOG_OK, "Length:        %.2lfs (%.2lfKB)",
-        params.durationSecs, mb);
-    loggerAppend(LOG_OK, "Sample Peak:   %+.2lfdBFS", params.amplitude);
-    loggerAppend(LOG_OK, "Sample Rate:   %uHz", params.sampleRate);
-    loggerAppend(LOG_OK, "Sample Format: %s", sampleFmt);
-    loggerAppend(LOG_OK, "Bit Depth:     %u-bit", params.bitsPerSample);
-    loggerAppend(LOG_OK, "Dither:        %s", dither);
-    loggerAppend(LOG_OK, "Output File:   '%s'", params.outputFile);
-
-    return params;
+    loggerAppend(LOG_INFO,
+        "generating %zu %s wave(s):", p->freqCount, type);
+    loggerAppend(LOG_INFO, "* Frequencies:   %s", toneList);
+    loggerAppend(LOG_INFO, "* Length:        %.2lfs (%.2lfKB)",
+        p->durationSecs, mb);
+    loggerAppend(LOG_INFO, "* Sample Peak:   %+.2lfdBFS", p->amplitude);
+    loggerAppend(LOG_INFO, "* Sample Rate:   %uHz", p->sampleRate);
+    loggerAppend(LOG_INFO, "* Sample Format: %s", sampleFmt);
+    loggerAppend(LOG_INFO, "* Bit Depth:     %u-bit", p->bitsPerSample);
+    loggerAppend(LOG_INFO, "* Dither:        %s", dither);
+    loggerAppend(LOG_INFO, "* Output File:   '%s'", p->outputFile);
 }
 
 double parseDouble(const char *line) {
@@ -746,6 +758,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate) {
 void applyDither(double *buf, size_t len, uint32_t bits);
 
 AudioBuffer audioBufferBuild(const Parameters *p) {
+    loggerAppend(LOG_INFO, "generating base wave(s)...");
     double *src = generateWaves(p);
     size_t len = (size_t)((p->sampleRate) * (p->durationSecs));
     uint32_t bits = p->bitsPerSample;
@@ -764,7 +777,17 @@ AudioBuffer audioBufferBuild(const Parameters *p) {
     void *buf = b.data;
     switch (p->sampleFormat) {
     case FMT_INT_PCM: {
-        if (p->applyDither) applyDither(src, len, bits);
+        if (p->applyDither) {
+            loggerAppend(LOG_INFO, "applying %zu-bit dither...",
+                (size_t)p->bitsPerSample);
+            applyDither(src, len, bits);
+        }
+
+        if (p->bitsPerSample != 64) {
+            loggerAppend(LOG_INFO, "truncating to %zu-bit %s...",
+                (size_t)p->bitsPerSample,
+                stringFromSampleFormat(p->sampleFormat));
+        }
 
         size_t maxInt = (size_t)((pow(2.0, bits - 1.0) - 1.0));
         switch (bits) {
