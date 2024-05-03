@@ -9,6 +9,7 @@
 #include <limits.h>
 #include <time.h>
 #include <errno.h>
+#include <assert.h>
 
 typedef struct WavHeader {
     char chunkID[4];
@@ -68,20 +69,26 @@ typedef enum LogState {
     LOG_EXIT
 } LogState;
 
+typedef struct AudioChunk {
+    double *buf;
+    size_t len;
+} AudioChunk;
+
 void loggerInit(const char *file);
 void loggerClose(int32_t code);
 void loggerAppend(LogState state, const char *restrict fmt, ...);
 WavHeader wavHeaderBuild(const Parameters *params);
 Parameters parametersParse(const char *file);
 void parametersDestroy(Parameters *p);
-double *generateWaves(const Parameters *p);
+AudioChunk generateWaveChunk(const Parameters *p);
 AudioBuffer audioBufferBuild(const Parameters *p);
 void audioBufferDestroy(AudioBuffer *b);
 
 #define LOG_FILE_NAME "log.txt"
 #define BUILD_BUG_ON(condition) ((void)sizeof(char[1 - 2 * !!(condition)]))
 
-int main(void) {
+int main(void)
+{
     BUILD_BUG_ON(sizeof(WavHeader) != 44); // header must be 44 bytes
 
     loggerInit(LOG_FILE_NAME);
@@ -90,8 +97,9 @@ int main(void) {
     const WavHeader header = wavHeaderBuild(&p);
     AudioBuffer buf = audioBufferBuild(&p);
 
-    FILE *f = fopen(p.outputFile, "wb"); // write-binary mode
-    if (!f) {
+    fclose(fopen(p.outputFile, "w")); // clear file's contents if it exists
+    FILE *f = fopen(p.outputFile, "ab"); // open it in append-binary mode
+    if (f == NULL) {
         loggerAppend(ERR_FATAL, "unable to open file '%s' for writing: %s",
             p.outputFile, strerror(errno));
         loggerClose(errno);
@@ -99,7 +107,16 @@ int main(void) {
     }
 
     fwrite(&header, sizeof(header), 1, f);
-    fwrite(buf.data, buf.bytesPerSample, buf.sampleCount, f);
+    double chunks = p.sampleRate * p.durationSecs / buf.sampleCount;
+    for (size_t i = 0; i < chunks; i++) {
+        fwrite(buf.data, buf.bytesPerSample, buf.sampleCount, f);
+    }
+
+    double remainder = chunks - (size_t)chunks;
+    if (remainder > 0.0) {
+        fwrite(buf.data, buf.bytesPerSample, buf.sampleCount * remainder, f);
+    }
+
     fclose(f);
     loggerClose(0);
     audioBufferDestroy(&buf);
@@ -114,11 +131,12 @@ char *readFileContents(const char *restrict file, FILE *f);
 
 static FILE *logFile = NULL;
 
-void loggerInit(const char *file) {
+void loggerInit(const char *file)
+{
     if (logFile) return;
 
     logFile = fopen(file, "w+");
-    if (!logFile) {
+    if (logFile == NULL) {
         fprintf(stderr,
             "FATAL: unable to open logging file '%s' for writing: %s\n",
             file, strerror(errno));
@@ -134,13 +152,14 @@ void loggerInit(const char *file) {
     loggerAppend(LOG_INIT, "WAVE generator initialized (%s)", localTime);
 }
 
-void loggerClose(int32_t code) {
+void loggerClose(int32_t code)
+{
     char *text = readFileContents(LOG_FILE_NAME, logFile);
     const char *status = code ? "abnormally" : "normally";
     loggerAppend(LOG_EXIT,
         "generator terminated %s with exit code %d", status, code);
     fclose(logFile);
-    if (!text) {
+    if (text == NULL) {
         remove(LOG_FILE_NAME);
         return;
     }
@@ -148,7 +167,8 @@ void loggerClose(int32_t code) {
     free(text);
 }
 
-void loggerAppend(LogState state, const char *restrict fmt, ...) {
+void loggerAppend(LogState state, const char *restrict fmt, ...)
+{
     const char *logState;
     switch (state) {
     case LOG_INIT: {
@@ -194,7 +214,8 @@ void loggerAppend(LogState state, const char *restrict fmt, ...) {
     va_end(args);
 }
 
-WavHeader wavHeaderBuild(const Parameters *p) {
+WavHeader wavHeaderBuild(const Parameters *p)
+{
     WavHeader h = {
         .chunkID = "RIFF",
         .format = "WAVE",
@@ -254,7 +275,8 @@ const char *stringFromWaveType(WaveType type);
 const char *stringFromSampleFormat(SampleFormat fmt);
 void logWaveProperties(Parameters *p);
 
-Parameters parametersParse(const char *file) {
+Parameters parametersParse(const char *file)
+{
     Parameters params = { // default values
         .freqs = malloc(sizeof(*params.freqs)),
         .freqCount = 1,
@@ -276,7 +298,7 @@ Parameters parametersParse(const char *file) {
     *params.freqs = 440.0;
 
     FILE *f = fopen(file, "r");
-    if (!f) {
+    if (f == NULL) {
         loggerAppend(ERR_READ, "unable to read config file '%s': %s",
             file, strerror(errno));
         logWaveProperties(&params);
@@ -285,7 +307,7 @@ Parameters parametersParse(const char *file) {
 
     char *fileBuf = readFileContents(file, f);
     fclose(f);
-    if (!fileBuf) return params;
+    if (fileBuf == NULL) return params;
 
     char *lines[LINE_COUNT] = {0};
     char *parserState = NULL;
@@ -327,22 +349,22 @@ Parameters parametersParse(const char *file) {
         } break;
         case LINE_WAVE_TYPE: {
             int32_t waveType = parseStringIntoWaveType(line);
-            if (!errno) params.waveType = waveType;
+            if (errno == 0) params.waveType = waveType;
         } break;
         case LINE_DURATION_SECONDS: {
             double durationSecs = parseDouble(line);
-            if (!errno) params.durationSecs = durationSecs;
+            if (errno == 0) params.durationSecs = durationSecs;
         } break;
         case LINE_AMPLITUDE: {
             double amplitude = parseDouble(line);
-            if (!errno) {
+            if (errno == 0) {
                 params.amplitude =
                     amplitude < MAX_AMP_DB ? amplitude : MAX_AMP_DB;
             }
         } break;
         case LINE_SAMPLE_RATE: {
             uint32_t sampleRate = parseUnsignedInt(line);
-            if (!errno) {
+            if (errno == 0) {
                 double highestFreq = 0.0;
                 for (size_t i = 0; i < params.freqCount; i++) {
                     if (params.freqs[i] > highestFreq) {
@@ -362,11 +384,11 @@ Parameters parametersParse(const char *file) {
         } break;
         case LINE_BITS_PER_SAMPLE: {
             uint32_t bitsPerSample = parseUnsignedInt(line);
-            if (!errno) params.bitsPerSample = bitsPerSample;
+            if (errno == 0) params.bitsPerSample = bitsPerSample;
         } break;
         case LINE_SAMPLE_FORMAT: {
             int32_t sampleFormat = parseStringIntoSampleFormat(line);
-            if (!errno) {
+            if (errno == 0) {
                 bool fmtOk = true;
                 uint32_t b = params.bitsPerSample;
                 switch (sampleFormat) {
@@ -402,13 +424,13 @@ Parameters parametersParse(const char *file) {
         } break;
         case LINE_APPLY_DITHER: {
             bool applyDither = parseBool(line);
-            if (!errno) params.applyDither = applyDither;
+            if (errno == 0) params.applyDither = applyDither;
         } break;
         case LINE_OUTPUT_FILE: {
             stripDoubleQuotes(line);
             int len = snprintf(NULL, 0, "%s.wav", line);
             char *fileName = malloc(len * sizeof(*fileName));
-            if (!fileName) {
+            if (fileName == NULL) {
                 ERR_OUT_OF_MEMORY();
                 exit(EXIT_FAILURE);
             }
@@ -427,13 +449,14 @@ Parameters parametersParse(const char *file) {
         }
     }
 
-    if (fileBuf) free(fileBuf);
+    if (fileBuf != NULL) free(fileBuf);
 
     logWaveProperties(&params);
     return params;
 }
 
-void logWaveProperties(Parameters *p) {
+void logWaveProperties(Parameters *p)
+{
     char toneList[4 * KB] = {0};
     for (size_t i = 0; i < p->freqCount && p->freqs; i++) {
         char num[32] = {0};
@@ -464,10 +487,11 @@ void logWaveProperties(Parameters *p) {
     loggerAppend(LOG_INFO, "* Output File:   '%s'", p->outputFile);
 }
 
-double parseDouble(const char *line) {
+double parseDouble(const char *line)
+{
     errno = 0;
     double n = strtod(line, NULL);
-    if (!n && errno) {
+    if (n == 0.0 && errno) {
         loggerAppend(ERR_PARSE,
             "unable to parse a floating-point number from '%s'", line);
     }
@@ -478,10 +502,11 @@ double parseDouble(const char *line) {
 #define INIT_DOUBLE_LIST_CAP 8
 #define DOUBLE_LIST_DELIMS ", "
 
-double *parseFreqList(char *line, size_t *listLen) {
+double *parseFreqList(char *line, size_t *listLen)
+{
     size_t len = INIT_DOUBLE_LIST_CAP;
     double *list = calloc(len, sizeof(*list));
-    if (!list) {
+    if (list == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
@@ -515,13 +540,13 @@ double *parseFreqList(char *line, size_t *listLen) {
     }
 
     len = i;
-    if (!len) {
+    if (len == 0) {
         free(list);
         return NULL;
     }
 
     double *trimmedList = realloc(list, len * sizeof(*list));
-    if (!trimmedList) {
+    if (trimmedList == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
@@ -531,10 +556,11 @@ double *parseFreqList(char *line, size_t *listLen) {
     return list;
 }
 
-uint32_t parseUnsignedInt(const char *line) {
+uint32_t parseUnsignedInt(const char *line)
+{
     errno = 0;
     unsigned long n = strtoul(line, NULL, 10);
-    if ((!n || n == ULONG_MAX)) {
+    if ((n == 0 || n == ULONG_MAX)) {
         loggerAppend(ERR_PARSE,
             "unable to parse an unsigned number from '%s'", line);
     }
@@ -542,7 +568,8 @@ uint32_t parseUnsignedInt(const char *line) {
     return (uint32_t)n;
 }
 
-int32_t parseStringIntoWaveType(char *restrict line) {
+int32_t parseStringIntoWaveType(char *restrict line)
+{
     stripDoubleQuotes(line);
     if (strcmp(line, "sine") == 0) return WAVE_SINE;
     if (strcmp(line, "triangle") == 0) return WAVE_TRIANGLE;
@@ -554,7 +581,8 @@ int32_t parseStringIntoWaveType(char *restrict line) {
     return -1;
 }
 
-int32_t parseStringIntoSampleFormat(char *restrict line) {
+int32_t parseStringIntoSampleFormat(char *restrict line)
+{
     stripDoubleQuotes(line);
     if (strcmp(line, "int") == 0) return FMT_INT_PCM;
     if (strcmp(line, "float") == 0) return FMT_FLOAT_PCM;
@@ -563,7 +591,8 @@ int32_t parseStringIntoSampleFormat(char *restrict line) {
     return -1;
 }
 
-bool parseBool(const char *line) {
+bool parseBool(const char *line)
+{
     if (strcmp(line, "true") == 0) {
         return true;
     } else if (strcmp(line, "false") == 0) {
@@ -576,13 +605,15 @@ bool parseBool(const char *line) {
     return false;
 }
 
-void parametersDestroy(Parameters *p) {
-    if (p->freqs) free(p->freqs);
-    if (p->outputFile) free(p->outputFile);
+void parametersDestroy(Parameters *p)
+{
+    if (p->freqs != NULL) free(p->freqs);
+    if (p->outputFile != NULL) free(p->outputFile);
     memset(p, 0, sizeof(*p));
 }
 
-void stripWhiteSpace(char *restrict string) {
+void stripWhiteSpace(char *restrict string)
+{
     if (*string == '\0') return;
 
     size_t length = strlen(string);
@@ -598,7 +629,8 @@ void stripWhiteSpace(char *restrict string) {
     }
 }
 
-void stripDoubleQuotes(char *restrict string) {
+void stripDoubleQuotes(char *restrict string)
+{
     if (*string == '\0') return;
 
     size_t length = strlen(string);
@@ -614,16 +646,17 @@ void stripDoubleQuotes(char *restrict string) {
     }
 }
 
-char *readFileContents(const char *restrict file, FILE *f) {
+char *readFileContents(const char *restrict file, FILE *f)
+{
     int err = fseek(f, 0, SEEK_END);
-    if (err) {
+    if (err != 0) {
         loggerAppend(ERR_READ, "unable to seek EOF for '%s': %s",
             file, strerror(errno));
         return NULL;
     }
 
     int len = ftell(f) + 1; // for NUL terminator
-    if (!len) {
+    if (len == 0) {
         return NULL;
     } else if (len == -1) {
         loggerAppend(ERR_READ, "unable to get EOF position of '%s': %s",
@@ -633,7 +666,7 @@ char *readFileContents(const char *restrict file, FILE *f) {
 
     rewind(f);
     char *fileBuf = calloc(len, sizeof(*fileBuf));
-    if (!fileBuf) {
+    if (fileBuf == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
@@ -643,7 +676,8 @@ char *readFileContents(const char *restrict file, FILE *f) {
     return fileBuf;
 }
 
-const char *stringFromWaveType(WaveType type) {
+const char *stringFromWaveType(WaveType type)
+{
     switch (type) {
     case WAVE_SINE:
         return "sine";
@@ -660,7 +694,8 @@ const char *stringFromWaveType(WaveType type) {
     }
 }
 
-const char *stringFromSampleFormat(SampleFormat fmt) {
+const char *stringFromSampleFormat(SampleFormat fmt)
+{
     return fmt == FMT_INT_PCM ? "integer" : "floating-point";
 }
 
@@ -670,42 +705,51 @@ double decibelsToGain(double decibels);
 bool machineIsBigEndian(void);
 void convertToLittleEndian(double *buf, size_t len);
 
-double *generateWaves(const Parameters *p) {
-    size_t len = (size_t)(p->sampleRate * p->durationSecs);
-    double *buf = calloc(len, sizeof(*buf));
-    if (!buf) {
+AudioChunk generateWaveChunk(const Parameters *p)
+{
+    double minFreq = p->freqs[0];
+    for (size_t i = 1; i < p->freqCount; i++) {
+        if (p->freqs[i] < minFreq) minFreq = p->freqs[i];        
+    }
+
+    AudioChunk c = {
+        .len = (size_t)(1.0 / minFreq * p->sampleRate),
+    };
+    c.buf = calloc(c.len, sizeof(*c.buf));
+    if (c.buf == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
 
     for (size_t i = 0; i < p->freqCount; i++) {
-        addWave(buf, len, p->waveType, p->freqs[i], p->sampleRate);
+        addWave(c.buf, c.len, p->waveType, p->freqs[i], p->sampleRate);
     }
 
-    double posPeak = *buf, negPeak = *buf;
-    for (size_t i = 1; i < len; i++) {
-        if (buf[i] > posPeak) posPeak = buf[i];
-        else if (buf[i] < negPeak) negPeak = buf[i];
+    double posPeak = c.buf[0], negPeak = posPeak;
+    for (size_t i = 1; i < c.len; i++) {
+        if (c.buf[i] > posPeak) posPeak = c.buf[i];
+        else if (c.buf[i] < negPeak) negPeak = c.buf[i];
     }
 
     double absPeak = posPeak > -negPeak ? posPeak : -negPeak;
     absPeak /= decibelsToGain(p->amplitude);
     if (absPeak != 1.0) {
-        for (size_t i = 0; i < len; i++) {
-            buf[i] /= absPeak;
+        for (size_t i = 0; i < c.len; i++) {
+            c.buf[i] /= absPeak;
         }
     }
 
-    if (machineIsBigEndian()) convertToLittleEndian(buf, len);
+    if (machineIsBigEndian()) convertToLittleEndian(c.buf, c.len);
 
-    return buf;
+    return c;
 }
 
 #define BELOW_NYQUIST(freq, rate) (freq < rate / 2.0)
 #define SINE_WAVE(freq, factor, rate, i) \
     (double)(sin((2.0 * PI * freq * factor) / rate * i))
 
-void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate) {
+void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate)
+{
     double factor = 1.0, amp = 1.0;
     switch (type) {
     case WAVE_SINE: {
@@ -762,10 +806,12 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate) {
 
 void applyDither(double *buf, size_t len, uint32_t bits);
 
-AudioBuffer audioBufferBuild(const Parameters *p) {
+AudioBuffer audioBufferBuild(const Parameters *p)
+{
     loggerAppend(LOG_INFO, "generating base wave(s)...");
-    double *src = generateWaves(p);
-    size_t len = (size_t)((p->sampleRate) * (p->durationSecs));
+    AudioChunk c = generateWaveChunk(p);
+    double *src = c.buf;
+    size_t len = c.len;
     uint32_t bits = p->bitsPerSample;
 
     AudioBuffer b = {
@@ -774,7 +820,7 @@ AudioBuffer audioBufferBuild(const Parameters *p) {
         .data = bits == 64 ? src : malloc(len * bits / 8)
     };
 
-    if (!b.data) {
+    if (b.data == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
@@ -839,16 +885,17 @@ AudioBuffer audioBufferBuild(const Parameters *p) {
     }
 
     free(src);
-
     return b;
 }
 
-void audioBufferDestroy(AudioBuffer *b) {
+void audioBufferDestroy(AudioBuffer *b)
+{
     free(b->data);
     memset(b, 0, sizeof(*b));
 }
 
-void applyDither(double *buf, size_t len, uint32_t bits) {
+void applyDither(double *buf, size_t len, uint32_t bits)
+{
     const double amp = 1.0 / pow(2.0, bits - 1) / RAND_MAX;
     for (size_t i = 0; i < len; i++) {
         buf[i] += (double)(rand() - rand()) * amp;
@@ -858,7 +905,8 @@ void applyDither(double *buf, size_t len, uint32_t bits) {
 #define MINUS_INF_DB -150.0
 #define MAX(a, b) (a > b ? a : b)
 
-double gainToDecibels(double gain) {
+double gainToDecibels(double gain)
+{
     return gain > 0.0 ? MAX(MINUS_INF_DB, log10(gain) * 20.0) : MINUS_INF_DB;
 }
 
@@ -866,12 +914,14 @@ double decibelsToGain(double decibels) {
     return decibels > MINUS_INF_DB ? pow(10.0, decibels * 0.05) : 0.0;
 }
 
-bool machineIsBigEndian(void) {
+bool machineIsBigEndian(void)
+{
     static const uint32_t n = 0x1;
     return *((char*)&n) == 0;
 }
 
-void convertToLittleEndian(double *buf, size_t len) {
+void convertToLittleEndian(double *buf, size_t len)
+{
     enum { size = sizeof(*buf) };
     union {
         double n;
