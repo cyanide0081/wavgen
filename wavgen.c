@@ -71,7 +71,7 @@ typedef enum LogState {
 
 typedef struct AudioChunk {
     double *buf;
-    size_t len;
+    size_t sampleCount;
 } AudioChunk;
 
 void loggerInit(const char *file);
@@ -106,6 +106,7 @@ int main(void)
         exit(EXIT_FAILURE);
     }
 
+    loggerAppend(LOG_INFO, "writing wave to file on disk: '%s'", p.outputFile);
     fwrite(&header, sizeof(header), 1, f);
     double chunks = p.sampleRate * p.durationSecs / buf.sampleCount;
     for (size_t i = 0; i < chunks; i++) {
@@ -133,7 +134,7 @@ static FILE *logFile = NULL;
 
 void loggerInit(const char *file)
 {
-    if (logFile) return;
+    if (logFile != NULL) return;
 
     logFile = fopen(file, "w+");
     if (logFile == NULL) {
@@ -147,7 +148,7 @@ void loggerInit(const char *file)
     struct tm *tm = localtime(&t);
     char localTime[KB];
     size_t ret = strftime(localTime, sizeof(localTime), "%F @ %T", tm);
-    if (!ret) strncpy(localTime, "unable to retrieve local date and time", KB);
+    if (ret == 0) strncpy(localTime, "unable to retrieve local date and time", KB);
 
     loggerAppend(LOG_INIT, "WAVE generator initialized (%s)", localTime);
 }
@@ -290,7 +291,7 @@ Parameters parametersParse(const char *file)
         .outputFile = strdup(OUT_FILE_NAME)
     };
 
-    if (!params.freqs) {
+    if (params.freqs == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
@@ -320,7 +321,7 @@ Parameters parametersParse(const char *file)
     for (size_t i = 0; i < LINE_COUNT; i++) {
         char *line = strtok(lines[i], ";");
         bool lineOk = false;
-        while (*line) {
+        while (*line != 0) {
             if (*line == '=') {
                 lineOk = true;
                 line += 1;
@@ -342,7 +343,7 @@ Parameters parametersParse(const char *file)
         case LINE_TONE_FREQUENCIES: {
             size_t listLen = 0;
             double *freqs = parseFreqList(line, &listLen);
-            if (freqs)  {
+            if (freqs != NULL)  {
                 free(params.freqs);
                 params.freqs = freqs, params.freqCount = listLen;
             }
@@ -713,20 +714,20 @@ AudioChunk generateWaveChunk(const Parameters *p)
     }
 
     AudioChunk c = {
-        .len = (size_t)(1.0 / minFreq * p->sampleRate),
+        .sampleCount = (size_t)(1.0 / minFreq * p->sampleRate),
     };
-    c.buf = calloc(c.len, sizeof(*c.buf));
+    c.buf = calloc(c.sampleCount, sizeof(*c.buf));
     if (c.buf == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
 
     for (size_t i = 0; i < p->freqCount; i++) {
-        addWave(c.buf, c.len, p->waveType, p->freqs[i], p->sampleRate);
+        addWave(c.buf, c.sampleCount, p->waveType, p->freqs[i], p->sampleRate);
     }
 
     double posPeak = c.buf[0], negPeak = posPeak;
-    for (size_t i = 1; i < c.len; i++) {
+    for (size_t i = 1; i < c.sampleCount; i++) {
         if (c.buf[i] > posPeak) posPeak = c.buf[i];
         else if (c.buf[i] < negPeak) negPeak = c.buf[i];
     }
@@ -734,12 +735,12 @@ AudioChunk generateWaveChunk(const Parameters *p)
     double absPeak = posPeak > -negPeak ? posPeak : -negPeak;
     absPeak /= decibelsToGain(p->amplitude);
     if (absPeak != 1.0) {
-        for (size_t i = 0; i < c.len; i++) {
+        for (size_t i = 0; i < c.sampleCount; i++) {
             c.buf[i] /= absPeak;
         }
     }
 
-    if (machineIsBigEndian()) convertToLittleEndian(c.buf, c.len);
+    if (machineIsBigEndian()) convertToLittleEndian(c.buf, c.sampleCount);
 
     return c;
 }
@@ -811,7 +812,7 @@ AudioBuffer audioBufferBuild(const Parameters *p)
     loggerAppend(LOG_INFO, "generating base wave(s)...");
     AudioChunk c = generateWaveChunk(p);
     double *src = c.buf;
-    size_t len = c.len;
+    size_t len = c.sampleCount;
     uint32_t bits = p->bitsPerSample;
 
     AudioBuffer b = {
