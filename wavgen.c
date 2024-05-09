@@ -42,12 +42,12 @@ typedef enum SampleFormat {
 typedef struct Parameters {
     double *freqs;
     size_t freqCount;
-    WaveType waveType;
     double durationSecs;
     double amplitude;
     uint32_t sampleRate;
     uint32_t bitsPerSample;
     SampleFormat sampleFormat;
+    WaveType waveType;
     bool applyDither;
     char *outputFile;
 } Parameters;
@@ -170,7 +170,7 @@ void loggerClose(int32_t code)
 
 void loggerAppend(LogState state, const char *restrict fmt, ...)
 {
-    const char *logState;
+    const char *logState = NULL;
     switch (state) {
     case LOG_INIT: {
         logState = "INIT";
@@ -656,7 +656,7 @@ char *readFileContents(const char *restrict file, FILE *f)
         return NULL;
     }
 
-    int len = ftell(f) + 1; // for NUL terminator
+    int len = (int)ftell(f) + 1; // for NUL terminator
     if (len == 0) {
         return NULL;
     } else if (len == -1) {
@@ -690,14 +690,14 @@ const char *waveTypeToString(WaveType type)
         return "saw";
     case WAVE_EVEN:
         return "even";
-    default:
-        return "unknown";
     }
+
+    return NULL;
 }
 
 const char *sampleFormatToString(SampleFormat fmt)
 {
-    return fmt == FMT_INT_PCM ? "integer" : "floating-point";
+    return fmt == FMT_INT_PCM ? "Integer" : "Floating-point";
 }
 
 void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate);
@@ -773,7 +773,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate)
     } break;
     case WAVE_SQUARE: {
         while (BELOW_NYQUIST(freq * factor, rate)) {
-            double amp = 4.0 / (factor * PI);
+            amp = 4.0 / (factor * PI);
             for (size_t i = 0; i < len; i++) {
                 buf[i] += SINE_WAVE(freq, factor, rate, i) * amp;
             }
@@ -783,7 +783,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate)
     } break;
     case WAVE_SAW: {
         while (BELOW_NYQUIST(freq * factor, rate)) {
-            double amp = 1.0 / factor;
+            amp = 1.0 / factor;
             for (size_t i = 0; i < len; i++) {
                 buf[i] += SINE_WAVE(freq, factor, rate, i) * amp;
             }
@@ -793,7 +793,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate)
     } break;
     case WAVE_EVEN: {
         while (BELOW_NYQUIST(freq * factor, rate)) {
-            double amp = 1.0 / factor;
+            amp = 1.0 / factor;
             for (size_t i = 0; i < len; i++) {
                 buf[i] += SINE_WAVE(freq, factor, rate, i) * amp;
             }
@@ -806,7 +806,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate)
     }
 }
 
-void applyDither(double *buf, size_t len, uint32_t bits);
+void applyDither(double *buf, size_t len, size_t bits);
 
 AudioBuffer audioBufferBuild(const Parameters *p)
 {
@@ -814,7 +814,7 @@ AudioBuffer audioBufferBuild(const Parameters *p)
     WavePeriod w = wavePeriodGenerate(p);
     double *src = w.buf;
     size_t len = w.sampleCount;
-    uint32_t bits = p->bitsPerSample;
+    size_t bits = p->bitsPerSample;
 
     AudioBuffer b = {
         .sampleCount = len,
@@ -831,34 +831,30 @@ AudioBuffer audioBufferBuild(const Parameters *p)
     switch (p->sampleFormat) {
     case FMT_INT_PCM: {
         if (p->applyDither) {
-            loggerAppend(LOG_INFO, "applying %zu-bit dither...",
-                (size_t)p->bitsPerSample);
+            loggerAppend(LOG_INFO, "applying %zu-bit dither...", bits);
             applyDither(src, len, bits);
         }
 
-        if (p->bitsPerSample != 64) {
-            loggerAppend(LOG_INFO, "truncating to %zu-bit %s...",
-                (size_t)p->bitsPerSample,
-                sampleFormatToString(p->sampleFormat));
-        }
-
+        loggerAppend(LOG_INFO, "truncating to %zu-bit %s...",
+            bits, sampleFormatToString(p->sampleFormat));
         size_t maxInt = (size_t)((pow(2.0, bits - 1.0) - 1.0));
+        printf("maxInt: %zu\n", maxInt);
         switch (bits) {
         case 8: {
             const uint8_t offset = INT8_MAX + 1;
             for (size_t i = 0; i < len; i++) {
-                ((uint8_t*)buf)[i] = (uint8_t)round(src[i] * maxInt + offset);
+                ((uint8_t*)buf)[i] = (uint8_t)lround(src[i] * maxInt + offset);
             }
         } break;
         case 16: {
             for (size_t i = 0; i < len; i++) {
-                ((int16_t*)buf)[i] = (int16_t)round(src[i] * maxInt);
+                ((int16_t*)buf)[i] = (int16_t)lround(src[i] * maxInt);
             }
         } break;
         case 24: {
             enum { word = 3 * sizeof(int8_t) };
             for (size_t i = 0; i < len; i++) {
-                int32_t val = (int32_t)round(src[i] * maxInt);
+                int32_t val = (int32_t)lround(src[i] * maxInt);
                 for (size_t j = 0, offset = 0; j < word; j++, offset += 8) {
                     ((int8_t*)buf)[i * word + j] = (int8_t)(val >> offset);
                 }
@@ -866,7 +862,7 @@ AudioBuffer audioBufferBuild(const Parameters *p)
         } break;
         case 32: {
             for (size_t i = 0; i < len; i++) {
-                ((int32_t*)buf)[i] = (int32_t)round(src[i] * maxInt);
+                ((int32_t*)buf)[i] = (int32_t)lround(src[i] * maxInt);
             }
         } break;
         }
@@ -894,9 +890,9 @@ void audioBufferDestroy(AudioBuffer *b)
     memset(b, 0, sizeof(*b));
 }
 
-void applyDither(double *buf, size_t len, uint32_t bits)
+void applyDither(double *buf, size_t len, size_t bits)
 {
-    const double amp = 1.0 / pow(2.0, bits - 1) / RAND_MAX;
+    const double amp = 1.0 / pow(2.0, bits - 1.0) / RAND_MAX;
     for (size_t i = 0; i < len; i++) {
         buf[i] += (double)(rand() - rand()) * amp;
     }
@@ -928,6 +924,7 @@ void convertToLittleEndian(void *buf, size_t len, size_t bits)
         double n;
         uint8_t *b;
     } src, res;
+    res.n = 0.0;
 
     for (size_t i = 0; i < len; i += size) {
         src.n = ((uint8_t*)buf)[i];
@@ -935,6 +932,6 @@ void convertToLittleEndian(void *buf, size_t len, size_t bits)
             res.b[j] = src.b[size - 1 - j];
         }
 
-        ((uint8_t*)buf)[i] = res.n;
+        ((uint8_t*)buf)[i] = (uint8_t)res.n;
     }
 }
