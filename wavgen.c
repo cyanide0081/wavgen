@@ -58,10 +58,10 @@ typedef struct AudioBuffer {
     size_t bytesPerSample;
 } AudioBuffer;
 
-typedef struct WavePeriod {
+typedef struct WaveChunk {
     double *buf;
     size_t sampleCount;
-} WavePeriod;
+} WaveChunk;
 
 typedef enum LogState {
     LOG_INIT,
@@ -79,7 +79,7 @@ void loggerAppend(LogState state, const char *restrict fmt, ...);
 WavHeader wavHeaderBuild(const Parameters *params);
 Parameters parametersParse(const char *file);
 void parametersDestroy(Parameters *p);
-WavePeriod wavePeriodGenerate(const Parameters *p);
+WaveChunk waveChunkGenerate(const Parameters *p);
 AudioBuffer audioBufferBuild(const Parameters *p);
 void audioBufferDestroy(AudioBuffer *b);
 
@@ -706,15 +706,15 @@ double decibelsToGain(double decibels);
 bool machineIsBigEndian(void);
 void convertToLittleEndian(void *buf, size_t len, size_t bits);
 
-WavePeriod wavePeriodGenerate(const Parameters *p)
+WaveChunk waveChunkGenerate(const Parameters *p)
 {
-    double minFreq = p->freqs[0];
+    double lowestFreq = p->freqs[0];
     for (size_t i = 1; i < p->freqCount; i++) {
-        if (p->freqs[i] < minFreq) minFreq = p->freqs[i];        
+        if (p->freqs[i] < lowestFreq) lowestFreq = p->freqs[i];        
     }
 
     double maxSamples = p->durationSecs * p->sampleRate;
-    double baseSampleCount = 1.0 / minFreq * p->sampleRate;
+    double baseSampleCount = 1.0 / lowestFreq * p->sampleRate;
     double sampleCount = baseSampleCount;
     /* making sure we don't get a chunk with an fractional amount of samples */
     while (sampleCount != (size_t)sampleCount && sampleCount < maxSamples) {
@@ -728,7 +728,7 @@ WavePeriod wavePeriodGenerate(const Parameters *p)
 
 #ifndef NDEBUG
     printf("sampleCount: %lf (%.2lfKB)\n", sampleCount, sampleCount / KB);
-    printf("minfreq: %lf, secs: %lf\n", minFreq, 1.0 / minFreq);
+    printf("minfreq: %lf, secs: %lf\n", lowestFreq, 1.0 / lowestFreq);
 #endif    
 
     double *buf = calloc(sampleCount, sizeof(*buf));
@@ -758,7 +758,7 @@ WavePeriod wavePeriodGenerate(const Parameters *p)
     // NOTE: moved this to buffer building step
     // if (machineIsBigEndian()) convertToLittleEndian(w.buf, w.sampleCount);
 
-    return (WavePeriod){
+    return (WaveChunk){
         .buf = buf,
         .sampleCount = sampleCount,    
     };
@@ -829,7 +829,7 @@ void applyDither(double *buf, size_t len, size_t bits);
 AudioBuffer audioBufferBuild(const Parameters *p)
 {
     loggerAppend(LOG_INFO, "generating base wave(s)...");
-    WavePeriod w = wavePeriodGenerate(p);
+    WaveChunk w = waveChunkGenerate(p);
     double *src = w.buf;
     size_t len = w.sampleCount;
     size_t bits = p->bitsPerSample;
