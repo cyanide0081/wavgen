@@ -713,37 +713,55 @@ WavePeriod wavePeriodGenerate(const Parameters *p)
         if (p->freqs[i] < minFreq) minFreq = p->freqs[i];        
     }
 
-    WavePeriod w = {
-        .sampleCount = (size_t)(1.0 / minFreq * p->sampleRate),
-    };
-    w.buf = calloc(w.sampleCount, sizeof(*w.buf));
-    if (w.buf == NULL) {
+    double maxSamples = p->durationSecs * p->sampleRate;
+    double baseSampleCount = 1.0 / minFreq * p->sampleRate;
+    double sampleCount = baseSampleCount;
+    /* making sure we don't get a chunk with an fractional amount of samples */
+    while (sampleCount != (size_t)sampleCount && sampleCount < maxSamples) {
+        sampleCount += baseSampleCount;
+    }
+
+    /* making sure we get at least one second worth of dithered samples */
+    if (p->applyDither) {
+        while (sampleCount < p->sampleRate) sampleCount += baseSampleCount;
+    }
+
+#ifndef NDEBUG
+    printf("sampleCount: %lf (%.2lfKB)\n", sampleCount, sampleCount / KB);
+    printf("minfreq: %lf, secs: %lf\n", minFreq, 1.0 / minFreq);
+#endif    
+
+    double *buf = calloc(sampleCount, sizeof(*buf));
+    if (buf == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
 
     for (size_t i = 0; i < p->freqCount; i++) {
-        addWave(w.buf, w.sampleCount, p->waveType, p->freqs[i], p->sampleRate);
+        addWave(buf, sampleCount, p->waveType, p->freqs[i], p->sampleRate);
     }
 
-    double posPeak = w.buf[0], negPeak = posPeak;
-    for (size_t i = 1; i < w.sampleCount; i++) {
-        if (w.buf[i] > posPeak) posPeak = w.buf[i];
-        else if (w.buf[i] < negPeak) negPeak = w.buf[i];
+    double posPeak = buf[0], negPeak = posPeak;
+    for (size_t i = 1; i < sampleCount; i++) {
+        if (buf[i] > posPeak) posPeak = buf[i];
+        else if (buf[i] < negPeak) negPeak = buf[i];
     }
 
     double absPeak = posPeak > -negPeak ? posPeak : -negPeak;
     absPeak /= decibelsToGain(p->amplitude);
     if (absPeak != 1.0) {
-        for (size_t i = 0; i < w.sampleCount; i++) {
-            w.buf[i] /= absPeak;
+        for (size_t i = 0; i < sampleCount; i++) {
+            buf[i] /= absPeak;
         }
     }
 
     // NOTE: moved this to buffer building step
     // if (machineIsBigEndian()) convertToLittleEndian(w.buf, w.sampleCount);
 
-    return w;
+    return (WavePeriod){
+        .buf = buf,
+        .sampleCount = sampleCount,    
+    };
 }
 
 #define BELOW_NYQUIST(freq, rate) (freq < rate / 2.0)
@@ -756,7 +774,7 @@ void addWave(double *buf, size_t len, int32_t type, double freq, int32_t rate)
     switch (type) {
     case WAVE_SINE: {
         for (size_t i = 0; i < len; i++) {
-            buf[i] += SINE_WAVE(freq, factor, rate, i);
+            buf[i] = SINE_WAVE(freq, factor, rate, i);
         }
     } break;
     case WAVE_TRIANGLE: {
@@ -815,30 +833,29 @@ AudioBuffer audioBufferBuild(const Parameters *p)
     double *src = w.buf;
     size_t len = w.sampleCount;
     size_t bits = p->bitsPerSample;
+    size_t bytes = bits / 8;
+
+    if (p->sampleFormat == FMT_INT_PCM && p->applyDither) {
+        loggerAppend(LOG_INFO, "applying %zu-bit dither...", bits);
+        applyDither(src, len, bits);
+    }
 
     AudioBuffer b = {
         .sampleCount = len,
-        .bytesPerSample = bits / 8,
-        .buf = bits == 64 ? src : malloc(len * bits / 8)
+        .bytesPerSample = bytes,
+        .buf = (bits == 64) ? src : malloc(len * bytes),
     };
 
     if (b.buf == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
-
+    
     void *buf = b.buf;
     switch (p->sampleFormat) {
     case FMT_INT_PCM: {
-        if (p->applyDither) {
-            loggerAppend(LOG_INFO, "applying %zu-bit dither...", bits);
-            applyDither(src, len, bits);
-        }
-
-        loggerAppend(LOG_INFO, "truncating to %zu-bit %s...",
-            bits, sampleFormatToString(p->sampleFormat));
+        loggerAppend(LOG_INFO, "truncating to %zu-bit integer", bits);
         size_t maxInt = (size_t)((pow(2.0, bits - 1.0) - 1.0));
-        printf("maxInt: %zu\n", maxInt);
         switch (bits) {
         case 8: {
             const uint8_t offset = INT8_MAX + 1;
