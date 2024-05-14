@@ -120,9 +120,6 @@ int main(void)
 
     fclose(f);
     loggerClose(0);
-    audioBufferDestroy(&buf);
-    parametersDestroy(&p);
-
     return 0;
 }
 
