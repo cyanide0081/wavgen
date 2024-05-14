@@ -82,6 +82,7 @@ void parametersDestroy(Parameters *p);
 WaveChunk waveChunkGenerate(const Parameters *p);
 AudioBuffer audioBufferBuild(const Parameters *p);
 void audioBufferDestroy(AudioBuffer *b);
+void logWaveProperties(const Parameters *p);
 
 #define LOG_FILE_NAME "log.txt"
 #define STATIC_ASSERT(condition) ((void)sizeof(char[1 - 2 * !(condition)]))
@@ -92,7 +93,8 @@ int main(void)
     loggerInit(LOG_FILE_NAME);
 
     Parameters p = parametersParse("config.cfg");
-    const WavHeader header = wavHeaderBuild(&p);
+    logWaveProperties(&p);
+    WavHeader header = wavHeaderBuild(&p);
     AudioBuffer buf = audioBufferBuild(&p);
 
     fclose(fopen(p.outputFile, "w")); // clear file's contents if it exists
@@ -168,30 +170,36 @@ void loggerClose(int32_t code)
     free(text);
 }
 
+#define VT_COLOR_CLEAR  "\x1B[0m"
+#define VT_COLOR_RED    "\x1B[91m"
+#define VT_COLOR_GREEN  "\x1B[92m"
+#define VT_COLOR_YELLOW "\x1B[93m"
+#define VT_COLOR_BLUE   "\x1B[94m"
+
 void loggerAppend(LogState state, const char *restrict fmt, ...)
 {
     const char *logState = NULL;
     switch (state) {
     case LOG_INIT: {
-        logState = "INIT";
+        logState = VT_COLOR_BLUE "INIT" VT_COLOR_CLEAR;
     } break;
     case LOG_INFO: {
-        logState = "INFO";
+        logState = VT_COLOR_GREEN "INFO" VT_COLOR_CLEAR;
     } break;
     case ERR_READ: {
-        logState = "READ";
+        logState = VT_COLOR_YELLOW "READ" VT_COLOR_CLEAR;
     } break;
     case ERR_PARSE: {
-        logState = "PARSE";
+        logState = VT_COLOR_YELLOW "PARSE" VT_COLOR_CLEAR;
     } break;
     case ERR_ARG: {
-        logState = "ARG";
+        logState = VT_COLOR_YELLOW "ARG" VT_COLOR_CLEAR;
     } break;
     case ERR_FATAL: {
-        logState = "FATAL";
+        logState = VT_COLOR_RED "FATAL" VT_COLOR_CLEAR;
     } break;
     case LOG_EXIT: {
-        logState = "EXIT";
+        logState = VT_COLOR_BLUE "EXIT" VT_COLOR_CLEAR;
     } break;
     }
 
@@ -274,7 +282,6 @@ void stripWhiteSpace(char *restrict string);
 void stripDoubleQuotes(char *restrict string);
 const char *waveTypeToString(WaveType type);
 const char *sampleFormatToString(SampleFormat fmt);
-void logWaveProperties(Parameters *p);
 
 Parameters parametersParse(const char *file)
 {
@@ -452,11 +459,10 @@ Parameters parametersParse(const char *file)
 
     if (fileBuf != NULL) free(fileBuf);
 
-    logWaveProperties(&params);
     return params;
 }
 
-void logWaveProperties(Parameters *p)
+void logWaveProperties(const Parameters *p)
 {
     char toneList[4 * KB] = {0};
     for (size_t i = 0; i < p->freqCount && p->freqs; i++) {
@@ -723,6 +729,7 @@ WaveChunk waveChunkGenerate(const Parameters *p)
 
     /* making sure we get at least one second worth of dithered samples */
     if (p->applyDither) {
+        baseSampleCount = sampleCount;
         while (sampleCount < p->sampleRate) sampleCount += baseSampleCount;
     }
 
@@ -754,9 +761,6 @@ WaveChunk waveChunkGenerate(const Parameters *p)
             buf[i] /= absPeak;
         }
     }
-
-    // NOTE: moved this to buffer building step
-    // if (machineIsBigEndian()) convertToLittleEndian(w.buf, w.sampleCount);
 
     return (WaveChunk){
         .buf = buf,
@@ -828,7 +832,7 @@ void applyDither(double *buf, size_t len, size_t bits);
 
 AudioBuffer audioBufferBuild(const Parameters *p)
 {
-    loggerAppend(LOG_INFO, "generating base wave(s)...");
+    loggerAppend(LOG_INFO, "generating base wave(s)");
     WaveChunk w = waveChunkGenerate(p);
     double *src = w.buf;
     size_t len = w.sampleCount;
@@ -836,7 +840,7 @@ AudioBuffer audioBufferBuild(const Parameters *p)
     size_t bytes = bits / 8;
 
     if (p->sampleFormat == FMT_INT_PCM && p->applyDither) {
-        loggerAppend(LOG_INFO, "applying %zu-bit dither...", bits);
+        loggerAppend(LOG_INFO, "applying %zu-bit dither", bits);
         applyDither(src, len, bits);
     }
 
