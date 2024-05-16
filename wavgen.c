@@ -106,7 +106,7 @@ int main(void)
         exit(EXIT_FAILURE);
     }
 
-    loggerAppend(LOG_INFO, "writing wave to file on disk: '%s'", p.outputFile);
+    loggerAppend(LOG_INFO, "writing wave to file on disk");
     fwrite(&header, sizeof(header), 1, f);
     double chunks = p.sampleRate * p.durationSecs / buf.sampleCount;
     for (size_t i = 0; i < (size_t)chunks; i++) {
@@ -275,8 +275,8 @@ uint32_t parseUnsignedInt(const char *line);
 WaveType parseWaveType(char *restrict line);
 SampleFormat parseSampleFormat(char *restrict line);
 bool parseBool(const char *line);
-void stripWhiteSpace(char *restrict string);
-void stripDoubleQuotes(char *restrict string);
+int isDoubleQuote(int c);
+void stripChars(char *restrict string, int (*isChar)(int));
 const char *waveTypeToString(WaveType type);
 const char *sampleFormatToString(SampleFormat fmt);
 
@@ -342,7 +342,7 @@ Parameters parametersParse(const char *file)
             continue;
         }
 
-        stripWhiteSpace(line);
+        stripChars(line, isspace);
         switch (i) {
         case LINE_TONE_FREQUENCIES: {
             size_t listLen = 0;
@@ -432,7 +432,7 @@ Parameters parametersParse(const char *file)
             if (errno == 0) params.applyDither = applyDither;
         } break;
         case LINE_OUTPUT_FILE: {
-            stripDoubleQuotes(line);
+            stripChars(line, isDoubleQuote);
             int len = snprintf(NULL, 0, "%s.wav", line);
             char *fileName = malloc(len * sizeof(*fileName));
             if (fileName == NULL) {
@@ -574,7 +574,7 @@ uint32_t parseUnsignedInt(const char *line)
 
 WaveType parseWaveType(char *restrict line)
 {
-    stripDoubleQuotes(line);
+    stripChars(line, isDoubleQuote);
     if (strcmp(line, "sine") == 0) return WAVE_SINE;
     if (strcmp(line, "triangle") == 0) return WAVE_TRIANGLE;
     if (strcmp(line, "square") == 0) return WAVE_SQUARE;
@@ -587,7 +587,7 @@ WaveType parseWaveType(char *restrict line)
 
 SampleFormat parseSampleFormat(char *restrict line)
 {
-    stripDoubleQuotes(line);
+    stripChars(line, isDoubleQuote);
     if (strcmp(line, "int") == 0) return FMT_INT_PCM;
     if (strcmp(line, "float") == 0) return FMT_FLOAT_PCM;
 
@@ -616,33 +616,21 @@ void parametersDestroy(Parameters *p)
     memset(p, 0, sizeof(*p));
 }
 
-void stripWhiteSpace(char *restrict string)
+int isDoubleQuote(int c)
 {
-    if (*string == '\0') return;
-
-    size_t length = strlen(string);
-    char *start = string, *end = string + length;
-    while (isspace(*start)) start += 1;
-
-    if (end > start) {
-        while (isspace(*--end)) *end = '\0';
-    }
-    if (start != string) {
-        memmove(string, start, end - start + 1);
-        memset(end, '\0', start - string);
-    }
+    return c == '"';
 }
 
-void stripDoubleQuotes(char *restrict string)
+void stripChars(char *restrict string, int (*isChar)(int))
 {
     if (*string == '\0') return;
 
     size_t length = strlen(string);
     char *start = string, *end = string + length;
-    while (*start == '"') start += 1;
+    while (isChar(*start)) start += 1;
 
     if (end > start) {
-        while (*--end == '"') *end = '\0';
+        while (isChar(*--end)) *end = '\0';
     }
     if (start != string) {
         memmove(string, start, end - start + 1);
@@ -837,22 +825,16 @@ AudioBuffer audioBufferBuild(const Parameters *p)
     size_t bytes = bits / 8;
 
     if (p->sampleFormat == FMT_INT_PCM && p->applyDither) {
-        loggerAppend(LOG_INFO, "applying %zu-bit dither", bits);
+        loggerAppend(LOG_INFO, "applying %zu-bit TPDF dither", bits);
         applyDither(src, len, bits);
     }
 
-    AudioBuffer b = {
-        .sampleCount = len,
-        .bytesPerSample = bytes,
-        .buf = (bits == 64) ? src : malloc(len * bytes),
-    };
-
-    if (b.buf == NULL) {
+    void *buf = (bits == 64) ? src : malloc(len * bytes);
+    if (buf == NULL) {
         ERR_OUT_OF_MEMORY();
         exit(EXIT_FAILURE);
     }
     
-    void *buf = b.buf;
     switch (p->sampleFormat) {
     case FMT_INT_PCM: {
         loggerAppend(LOG_INFO, "truncating to %zu-bit integer", bits);
@@ -899,7 +881,11 @@ AudioBuffer audioBufferBuild(const Parameters *p)
     if (bits != 64) free(src);
     if (machineIsBigEndian()) convertToLittleEndian(buf, len, bits);
 
-    return b;
+    return (AudioBuffer){
+        .buf = buf,
+        .sampleCount = len,
+        .bytesPerSample = bits / 8,
+    };
 }
 
 void audioBufferDestroy(AudioBuffer *b)
